@@ -1,0 +1,6 @@
+{
+  "name": "WorkFlow AI",
+  "description": "Personal work management and productivity system with automated prioritization, time tracking, dynamic analytics, and AI recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
