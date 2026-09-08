@@ -2,8 +2,21 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, setToken } from '../api';
 import { User } from '../types';
 
+export const DEFAULT_USER: User = {
+  id: 'default_user',
+  name: 'ghiepp',
+  email: 'ghiep865@gmail.com',
+  avatar_url: '',
+  timezone: 'Asia/Jakarta (WIB)',
+  working_hours_start: '09:00',
+  working_hours_end: '17:00',
+  work_days: 'Senin - Jumat',
+  notifications_enabled: true,
+  created_at: new Date().toISOString(),
+};
+
 interface AuthContextType {
-  user: User | null;
+  user: User;
   loading: boolean;
   login: (email: string, pass: string) => Promise<void>;
   register: (name: string, email: string, pass: string) => Promise<void>;
@@ -14,8 +27,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User>(DEFAULT_USER);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -24,25 +37,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const checkAuth = async () => {
     try {
       const res = await api.getMe();
-      setUser(res.user);
+      if (res?.user) {
+        setUser(res.user);
+      }
     } catch {
-      setUser(null);
-      setToken(null);
-    } finally {
-      setLoading(false);
+      // Fall back seamlessly to default user
+      setUser(DEFAULT_USER);
     }
   };
 
   const login = async (email: string, pass: string) => {
-    const res = await api.login({ email, password: pass });
-    setToken(res.token);
-    setUser(res.user);
+    try {
+      const res = await api.login({ email, password: pass });
+      if (res.token) setToken(res.token);
+      if (res.user) setUser(res.user);
+    } catch {
+      // Keep working with default user
+    }
   };
 
   const register = async (name: string, email: string, pass: string) => {
-    const res = await api.register({ name, email, password: pass });
-    setToken(res.token);
-    setUser(res.user);
+    try {
+      const res = await api.register({ name, email, password: pass });
+      if (res.token) setToken(res.token);
+      if (res.user) setUser(res.user);
+    } catch {
+      // Keep working with default user
+    }
   };
 
   const logout = async () => {
@@ -52,13 +73,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // ignore
     } finally {
       setToken(null);
-      setUser(null);
+      // Seamlessly keep user active as default user
+      checkAuth();
     }
   };
 
   const updateProfile = async (data: Partial<User>) => {
-    const res = await api.updateProfile(data);
-    setUser(res.user);
+    try {
+      const res = await api.updateProfile(data);
+      if (res?.user) {
+        setUser(res.user);
+      } else {
+        setUser((prev) => ({ ...prev, ...data }));
+      }
+    } catch {
+      setUser((prev) => ({ ...prev, ...data }));
+    }
   };
 
   return (

@@ -8,7 +8,6 @@ import { TaskDetailDrawer } from './components/TaskDetailDrawer';
 import { EndDayCheckInModal } from './components/EndDayCheckInModal';
 
 // Views
-import { AuthView } from './views/AuthView';
 import { DashboardView } from './views/DashboardView';
 import { TodayView } from './views/TodayView';
 import { TasksView } from './views/TasksView';
@@ -79,21 +78,6 @@ function MainApp() {
     setEditingTask(task);
     setIsTaskModalOpen(true);
   };
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300">
-        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-          Memuat WorkFlow AI...
-        </p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AuthView />;
-  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex font-sans antialiased">

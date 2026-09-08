@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { getDb } from './server/db.js';
-import { apiRouter } from './server/routes.js';
+import { apiRouter, ensureDefaultUser } from './server/routes.js';
 
 async function startServer() {
   const app = express();
@@ -10,6 +10,7 @@ async function startServer() {
 
   // Initialize SQLite database
   await getDb();
+  ensureDefaultUser();
   console.log('SQLite database initialized successfully.');
 
   app.use(express.json());

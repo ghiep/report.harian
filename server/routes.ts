@@ -14,17 +14,35 @@ export const apiRouter = Router();
 // In-memory token store for sessions: token -> userId
 const sessions = new Map<string, string>();
 
-// Auth middleware
+export const DEFAULT_USER_ID = 'default_user';
+
+export function ensureDefaultUser() {
+  try {
+    const existing = queryOne('SELECT id FROM users WHERE id = ?', [DEFAULT_USER_ID]);
+    if (!existing) {
+      const now = new Date().toISOString();
+      execute(
+        `INSERT OR IGNORE INTO users (id, name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        [DEFAULT_USER_ID, 'ghiepp', 'ghiep865@gmail.com', 'no_password_required', now, now]
+      );
+    }
+  } catch (err) {
+    console.error('Error ensuring default user exists:', err);
+  }
+}
+
+// Auth middleware (seamlessly defaults to default_user if not logged in)
 function authenticate(req: Request, res: Response, next: () => void) {
+  ensureDefaultUser();
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
 
-  if (!token || !sessions.has(token)) {
-    return res.status(401).json({ error: 'Sesi login tidak valid atau telah berakhir.' });
+  if (token && sessions.has(token)) {
+    (req as any).userId = sessions.get(token)!;
+  } else {
+    // Automatically use default_user so the app works without friction
+    (req as any).userId = DEFAULT_USER_ID;
   }
-
-  const userId = sessions.get(token)!;
-  (req as any).userId = userId;
   next();
 }
 
@@ -100,12 +118,18 @@ apiRouter.post('/auth/logout', authenticate, (req, res) => {
 });
 
 apiRouter.get('/auth/me', authenticate, (req, res) => {
-  const userId = (req as any).userId;
-  const user = queryOne(
+  const userId = (req as any).userId || DEFAULT_USER_ID;
+  let user = queryOne(
     'SELECT id, name, email, avatar_url, timezone, working_hours_start, working_hours_end, work_days, notifications_enabled, created_at FROM users WHERE id = ?',
     [userId]
   );
-  if (!user) return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
+  if (!user) {
+    ensureDefaultUser();
+    user = queryOne(
+      'SELECT id, name, email, avatar_url, timezone, working_hours_start, working_hours_end, work_days, notifications_enabled, created_at FROM users WHERE id = ?',
+      [DEFAULT_USER_ID]
+    );
+  }
   res.json({ user });
 });
 

@@ -30,9 +30,25 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers,
   });
 
-  const data = await res.json();
+  const contentType = res.headers.get('content-type') || '';
+  let data: any;
+
+  if (contentType.includes('application/json')) {
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+  } else {
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`Server status ${res.status}`);
+    }
+    data = text;
+  }
+
   if (!res.ok) {
-    throw new Error(data.error || 'Terjadi kesalahan pada server');
+    throw new Error(data?.error || `Terjadi kesalahan pada server (${res.status})`);
   }
   return data as T;
 }

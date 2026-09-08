@@ -136,22 +136,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* User Profile Footer */}
       <div className="p-4 border-t border-slate-800 bg-slate-900/90">
-        <div className="flex items-center justify-between gap-3 p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition">
+        <div
+          onClick={() => handleNav('settings')}
+          className="flex items-center justify-between gap-3 p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition cursor-pointer group"
+          title="Buka Pengaturan Akun"
+        >
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm ring-2 ring-slate-700">
               {user?.name ? user.name.charAt(0).toUpperCase() : <UserIcon className="w-4 h-4" />}
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-white truncate">{user?.name || 'Pengguna'}</p>
-              <p className="text-[11px] text-slate-400 truncate">{user?.email || 'user@workflow.ai'}</p>
+              <p className="text-xs font-semibold text-white truncate group-hover:text-indigo-300 transition">{user?.name || 'ghiepp'}</p>
+              <p className="text-[11px] text-slate-400 truncate">{user?.email || 'ghiep865@gmail.com'}</p>
             </div>
           </div>
           <button
-            onClick={logout}
-            title="Keluar / Logout"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleNav('settings');
+            }}
+            title="Pengaturan"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 transition shrink-0"
           >
-            <LogOut className="w-4 h-4" />
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>
