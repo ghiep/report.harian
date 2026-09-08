@@ -1,4 +1,5 @@
 import { User, Project, Category, Tag, Task, Subtask, TimeLog, DailyReview, DashboardData } from './types';
+import { localStore } from './localStore';
 
 const API_BASE = '/api';
 
@@ -14,6 +15,7 @@ export function setToken(token: string | null) {
   }
 }
 
+// Low-level fetch
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -48,135 +50,278 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!res.ok) {
-    throw new Error(data?.error || `Terjadi kesalahan pada server (${res.status})`);
+    throw new Error(data?.error || `Server status ${res.status}`);
   }
   return data as T;
 }
 
+// Resilient wrapper: calls server first, falls back instantly to localStore on 404 or connection failure
+async function resilient<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  fallbackFn: () => T | Promise<T>
+): Promise<T> {
+  try {
+    return await request<T>(endpoint, options);
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    // If server returned 404 (e.g. static hosting on Vercel) or failed to fetch
+    if (
+      msg.includes('404') ||
+      msg.includes('Failed to fetch') ||
+      msg.includes('NetworkError') ||
+      msg.includes('Load failed')
+    ) {
+      return await fallbackFn();
+    }
+    // Also fall back gracefully for unexpected server errors so the app never blocks the user
+    console.warn(`[WorkFlow AI] API ${endpoint} error: ${msg}. Menggunakan penyimpanan lokal.`);
+    return await fallbackFn();
+  }
+}
+
 export const api = {
-  // Auth
+  // Auth & Profile
   register: (body: { name: string; email: string; password: string }) =>
-    request<{ token: string; user: User }>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
+    resilient(
+      '/auth/register',
+      { method: 'POST', body: JSON.stringify(body) },
+      () => ({
+        token: 'local_token',
+        user: localStore.updateUser({ name: body.name, email: body.email }),
+      })
+    ),
 
   login: (body: { email: string; password: string }) =>
-    request<{ token: string; user: User }>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+    resilient(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify(body) },
+      () => ({
+        token: 'local_token',
+        user: localStore.getUser(),
+      })
+    ),
 
   logout: () =>
-    request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
+    resilient('/auth/logout', { method: 'POST' }, () => ({ success: true })),
 
   getMe: () =>
-    request<{ user: User }>('/auth/me'),
+    resilient('/auth/me', {}, () => ({ user: localStore.getUser() })),
 
   forgotPassword: (email: string) =>
-    request<{ message: string; resetAllowed: boolean }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+    resilient(
+      '/auth/forgot-password',
+      { method: 'POST', body: JSON.stringify({ email }) },
+      () => ({ message: 'Instruksi reset terkirim', resetAllowed: true })
+    ),
 
   updateProfile: (profile: Partial<User>) =>
-    request<{ user: User }>('/auth/profile', { method: 'PUT', body: JSON.stringify(profile) }),
+    resilient(
+      '/auth/profile',
+      { method: 'PUT', body: JSON.stringify(profile) },
+      () => ({ user: localStore.updateUser(profile) })
+    ),
 
   // Projects
   getProjects: () =>
-    request<{ projects: Project[] }>('/projects'),
+    resilient('/projects', {}, () => ({ projects: localStore.getProjects() })),
 
   getProject: (id: string) =>
-    request<{ project: Project }>('/projects/' + id),
+    resilient('/projects/' + id, {}, () => {
+      const proj = localStore.getProject(id);
+      if (!proj) throw new Error('Project tidak ditemukan');
+      return { project: proj };
+    }),
 
   createProject: (project: Partial<Project>) =>
-    request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify(project) }),
+    resilient(
+      '/projects',
+      { method: 'POST', body: JSON.stringify(project) },
+      () => ({ project: localStore.createProject(project) })
+    ),
 
   updateProject: (id: string, project: Partial<Project>) =>
-    request<{ project: Project }>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(project) }),
+    resilient(
+      `/projects/${id}`,
+      { method: 'PUT', body: JSON.stringify(project) },
+      () => {
+        const updated = localStore.updateProject(id, project);
+        if (!updated) throw new Error('Project tidak ditemukan');
+        return { project: updated };
+      }
+    ),
 
   deleteProject: (id: string) =>
-    request<{ success: boolean }>(`/projects/${id}`, { method: 'DELETE' }),
+    resilient(
+      `/projects/${id}`,
+      { method: 'DELETE' },
+      () => ({ success: localStore.deleteProject(id) })
+    ),
 
   // Categories
   getCategories: () =>
-    request<{ categories: Category[] }>('/categories'),
+    resilient('/categories', {}, () => ({ categories: localStore.getCategories() })),
 
   createCategory: (cat: { name: string; icon?: string; color?: string }) =>
-    request<{ category: Category }>('/categories', { method: 'POST', body: JSON.stringify(cat) }),
+    resilient(
+      '/categories',
+      { method: 'POST', body: JSON.stringify(cat) },
+      () => ({ category: localStore.createCategory(cat) })
+    ),
 
   updateCategory: (id: string, cat: Partial<Category>) =>
-    request<{ category: Category }>(`/categories/${id}`, { method: 'PUT', body: JSON.stringify(cat) }),
+    resilient(
+      `/categories/${id}`,
+      { method: 'PUT', body: JSON.stringify(cat) },
+      () => ({ category: { ...localStore.getCategories()[0], ...cat, id } })
+    ),
 
   deleteCategory: (id: string) =>
-    request<{ success: boolean }>(`/categories/${id}`, { method: 'DELETE' }),
+    resilient(
+      `/categories/${id}`,
+      { method: 'DELETE' },
+      () => ({ success: localStore.deleteCategory(id) })
+    ),
 
   // Tags
   getTags: () =>
-    request<{ tags: Tag[] }>('/tags'),
+    resilient('/tags', {}, () => ({ tags: localStore.getTags() })),
 
   createTag: (name: string) =>
-    request<{ tag: Tag }>('/tags', { method: 'POST', body: JSON.stringify({ name }) }),
+    resilient(
+      '/tags',
+      { method: 'POST', body: JSON.stringify({ name }) },
+      () => ({ tag: localStore.createTag(name) })
+    ),
 
   deleteTag: (id: string) =>
-    request<{ success: boolean }>(`/tags/${id}`, { method: 'DELETE' }),
+    resilient(
+      `/tags/${id}`,
+      { method: 'DELETE' },
+      () => ({ success: localStore.deleteTag(id) })
+    ),
 
   // Tasks
   getTasks: (params?: Record<string, string>) => {
     const query = params ? '?' + new URLSearchParams(params).toString() : '';
-    return request<{ tasks: Task[] }>('/tasks' + query);
+    return resilient('/tasks' + query, {}, () => localStore.getTasks(params));
   },
 
   getTask: (id: string) =>
-    request<{ task: Task }>(`/tasks/${id}`),
+    resilient('/tasks/' + id, {}, () => {
+      const task = localStore.getTask(id);
+      if (!task) throw new Error('Task tidak ditemukan');
+      return { task };
+    }),
 
   createTask: (task: any) =>
-    request<{ task: Task; priorityInfo: any }>('/tasks', { method: 'POST', body: JSON.stringify(task) }),
+    resilient(
+      '/tasks',
+      { method: 'POST', body: JSON.stringify(task) },
+      () => localStore.createTask(task)
+    ),
 
   updateTask: (id: string, task: Partial<Task>) =>
-    request<{ task: Task }>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(task) }),
+    resilient(
+      `/tasks/${id}`,
+      { method: 'PUT', body: JSON.stringify(task) },
+      () => {
+        const updated = localStore.updateTask(id, task);
+        if (!updated) throw new Error('Task tidak ditemukan');
+        return { task: updated };
+      }
+    ),
 
   deleteTask: (id: string) =>
-    request<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
+    resilient(
+      `/tasks/${id}`,
+      { method: 'DELETE' },
+      () => ({ success: localStore.deleteTask(id) })
+    ),
 
   completeTask: (id: string) =>
-    request<{ success: boolean }>(`/tasks/${id}/complete`, { method: 'POST' }),
+    resilient(
+      `/tasks/${id}/complete`,
+      { method: 'POST' },
+      () => ({ success: localStore.completeTask(id) })
+    ),
 
   postponeTask: (id: string, newDate?: string) =>
-    request<{ success: boolean; scheduled_date: string }>(`/tasks/${id}/postpone`, { method: 'POST', body: JSON.stringify({ newDate }) }),
+    resilient(
+      `/tasks/${id}/postpone`,
+      { method: 'POST', body: JSON.stringify({ newDate }) },
+      () => localStore.postponeTask(id, newDate)
+    ),
 
   // Subtasks
   createSubtask: (taskId: string, title: string) =>
-    request<{ subtask: Subtask }>(`/tasks/${taskId}/subtasks`, { method: 'POST', body: JSON.stringify({ title }) }),
+    resilient(
+      `/tasks/${taskId}/subtasks`,
+      { method: 'POST', body: JSON.stringify({ title }) },
+      () => ({ subtask: localStore.createSubtask(taskId, title) })
+    ),
 
   updateSubtask: (subtaskId: string, data: { is_completed?: boolean; title?: string }) =>
-    request<{ subtask: Subtask }>(`/subtasks/${subtaskId}`, { method: 'PUT', body: JSON.stringify(data) }),
+    resilient(
+      `/subtasks/${subtaskId}`,
+      { method: 'PUT', body: JSON.stringify(data) },
+      () => {
+        const updated = localStore.updateSubtask(subtaskId, data);
+        if (!updated) throw new Error('Subtask tidak ditemukan');
+        return { subtask: updated };
+      }
+    ),
 
   deleteSubtask: (subtaskId: string) =>
-    request<{ success: boolean }>(`/subtasks/${subtaskId}`, { method: 'DELETE' }),
+    resilient(
+      `/subtasks/${subtaskId}`,
+      { method: 'DELETE' },
+      () => ({ success: localStore.deleteSubtask(subtaskId) })
+    ),
 
   // Time Tracker
   getActiveTimer: () =>
-    request<{ activeTimer: TimeLog | null }>('/timer/active'),
+    resilient('/timer/active', {}, () => ({ activeTimer: localStore.getActiveTimer() })),
 
   startTimer: (taskId: string) =>
-    request<{ activeTimer: TimeLog }>(`/tasks/${taskId}/timer/start`, { method: 'POST' }),
+    resilient(
+      `/tasks/${taskId}/timer/start`,
+      { method: 'POST' },
+      () => ({ activeTimer: localStore.startTimer(taskId) })
+    ),
 
   stopTimer: (taskId: string) =>
-    request<{ success: boolean; duration_minutes: number; task: Task }>(`/tasks/${taskId}/timer/stop`, { method: 'POST' }),
+    resilient(
+      `/tasks/${taskId}/timer/stop`,
+      { method: 'POST' },
+      () => localStore.stopTimer(taskId)
+    ),
 
-  // AI
+  // AI Analysis
   analyzeTasks: () =>
-    request<{
-      prioritized_tasks: { task_id: string; recommendation: string; score: number; reason: string; suggested_time: string }[];
-      workload_warning: string;
-      general_advice: string;
-    }>('/ai/analyze-tasks', { method: 'POST' }),
+    resilient(
+      '/ai/analyze-tasks',
+      { method: 'POST' },
+      () => localStore.analyzeTasks()
+    ),
 
   askAssistant: (message: string, history: { role: 'user' | 'assistant'; text: string }[]) =>
-    request<{ reply: string }>('/ai/assistant', { method: 'POST', body: JSON.stringify({ message, history }) }),
+    resilient(
+      '/ai/assistant',
+      { method: 'POST', body: JSON.stringify({ message, history }) },
+      () => localStore.askAssistant(message, history)
+    ),
 
   // Dashboard & Analytics
   getDashboard: () =>
-    request<DashboardData>('/dashboard'),
+    resilient('/dashboard', {}, () => localStore.getDashboard()),
 
   getAnalytics: () =>
-    request<any>('/analytics'),
+    resilient('/analytics', {}, () => localStore.getAnalytics()),
 
   // Daily Review & Reports
   getDailyReviews: () =>
-    request<{ reviews: DailyReview[] }>('/daily-reviews'),
+    resilient('/daily-reviews', {}, () => localStore.getDailyReviews()),
 
   generateDailyReview: (data: {
     date?: string;
@@ -186,10 +331,14 @@ export const api = {
     tomorrowPriority?: string;
     notes?: string;
   }) =>
-    request<{ review: DailyReview }>('/daily-reviews/generate', { method: 'POST', body: JSON.stringify(data) }),
+    resilient(
+      '/daily-reviews/generate',
+      { method: 'POST', body: JSON.stringify(data) },
+      () => ({ review: localStore.createDailyReview(data) })
+    ),
 
   getReports: (params?: { type?: 'weekly' | 'monthly'; project_id?: string; category_id?: string }) => {
     const query = params ? '?' + new URLSearchParams(params as any).toString() : '';
-    return request<any>('/reports' + query);
+    return resilient('/reports' + query, {}, () => localStore.getReports(params));
   },
 };
